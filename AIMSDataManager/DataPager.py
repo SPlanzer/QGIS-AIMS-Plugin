@@ -76,7 +76,7 @@ class DataPager(Observable):
         self.inq = queues['in']
         self.outq = queues['out']
         self.respq = queues['resp']
-        #self._stop = threading.Event()
+
         
 
     def run(self):
@@ -210,13 +210,32 @@ class DataPager(Observable):
         
         ref = 'FP.{0}.Page{1}.{2:%y%m%d.%H%M%S}.{3}'.format(self.etft,pno,DT.now(),str(random.randint(0,1000)).zfill(3))
         aimslog.info('init DU {}'.format(ref))
-        self.duinst[ref] = self._fetchPage(ref,pno)
+        self.duinst[ref] = self._fetchFeedPage(ref,pno)
         self.duinst[ref].register(self)
         self.duinst[ref].start()
         print 'REF (append)',ref
         return ref    
     
-    def _fetchPage(self,ref,pno):
+    
+    def _fetchRequestPage(self,ref,pno):
+        '''Build DataUpdate request instance          
+        @param ref: Unique reference string
+        @type ref: String      
+        @param pno: Page number to build DataUpdater request from
+        @type pno: Integer
+        @return: DataUpdater
+        '''   
+        params = (ref,self.conf,self.factory)
+        adrq = Queue.Queue()
+        du = self.updater(params,adrq)
+        #address/feature requests called with bbox parameters
+        if self.etft==FEEDS['AF']: du.setup(self.etft,self.sw,self.ne,pno)
+        else: du.setup(self.etft,None,None,pno)
+        du.setName(ref)
+        du.setDaemon(True)
+        return du
+    
+    def _fetchFeedPage(self,ref,pno):
         '''Build DataUpdate instance          
         @param ref: Unique reference string
         @type ref: String      
@@ -235,16 +254,6 @@ class DataPager(Observable):
         return du
     
 
-
-    #--------------------------------------------------------------------------
-    
-
-        
-
-        
-  
-        
-        
     
 
     
