@@ -21,6 +21,7 @@ import threading
 import Queue
 
 from Observable import Observable
+from DataPager import DataPager
 from DataUpdater import DataUpdater,DataUpdaterAction,DataUpdaterApproval,DataUpdaterGroupAction,DataUpdaterGroupApproval,DataUpdaterUserAction
 from AimsApi import AimsApi 
 from AimsLogging import Logger
@@ -111,7 +112,9 @@ class DataSync(Observable):
         self.inq = queues['in']
         self.outq = queues['out']
         self.respq = queues['resp']
-        #self._stop = threading.Event()
+        #
+        self.pager = DataPager(params,queues)
+        
         
     def setup(self,sw=None,ne=None):
         '''Parameter setup for coordinate feature requests.
@@ -125,7 +128,7 @@ class DataSync(Observable):
     def run(self):
         '''Continual loop running periodic feed fetch updates'''
         while not self.stopped():
-            if not self.updater_running: self.fetchFeedUpdates(self.ftracker['threads'])
+            if not self.updater_running: self.pager.fetchPages(self.ftracker['threads'])
             time.sleep(self.ftracker['interval'])
             
     #@override
@@ -145,131 +148,15 @@ class DataSync(Observable):
     def observe(self,_,*args, **kwargs):
         '''Overridden observe method calling thread management function
         @params _: Discarded observable
-        @param *args: Wrapped args, where we only use the first arg as the managePage ref value
+        @param *args: Wrapped args, where we only use the first arg as the _updatePageRefs ref value
         @param **kwargs: Wrapped kwargs, discarded
         '''
         if not self.stopped():
-            self._managePage(args[0])
-        
-    def _managePage(self,ref):
-        '''Thread management function called when a periodic thread ends, posting new data and starting a new thread in pool if required
-        @param ref: Unique reference string
-        @type ref: String
-        '''
-        #print '{}{} finished'.format(FeedType.reverse[self.ft][:2].capitalize(),r['page'])
-        aimslog.info('Extracting queue for DU pool {}'.format(ref))
-        #print [r['ref'] for r in self.pool]
-        #print 'extracting queue for DU pool {}'.format(ref)
-        r = None
-        with pool_lock:
-            aimslog.info('{} complete'.format(ref))
-            #print 'POOLSTATE',self.pool  
-            #print 'POOLREMOVE',ref
-            r = [x for x in self.pool if x['ref']==ref][0] 
-            alist = self.duinst[ref].queue.get()
-            acount = len(alist)
-            self.newaddr += alist
-            nextpage = max([r2['page'] for r2 in self.pool])+1
-            #del self.duinst[ref]#ERROR? this cant be good, removing the DU during its own call to notify
-            aimslog.debug('PAGE TIME {} {}s'.format(ref,time.time()-r['time']))
-            #print 'POOLTIME {} {}'.format(ref,time.time()-r['time'])
-            self.pool.remove(r)
-            #if N>0 features return, spawn another thread
-            if acount<MAX_FEATURE_COUNT:
-                #non-full page returned, must be the last one
-                self.exhausted = r['page']
-            if acount>0:
-                #features returned, not zero and not less than max so get another
-                self.lastpage = max(r['page'],self.lastpage)
-                if nextpage<self.exhausted:
-                    ref = self._monitorPage(nextpage)
-                    self.pool.append({'page':nextpage,'ref':ref,'time':time.time()})
-                    #print 'POOLADD 2',ref
-            else:
-                pass
-                #print 'No addresses found in page {}{}'.format(FeedType.reverse[self.ft][:2].capitalize(),r['page'])
-            
-        if len(self.pool)==0:
-            self.syncFeeds(self.newaddr)#syncfeeds does notify DM
-            self.managePage((None,self.lastpage))
-            aimslog.debug('FULL TIME {} took {}s'.format(ref,time.time()-self.start_time))
-            self.updater_running = False
-            #print 'POOLCLOSE',ref,time.strftime('%Y-%M-%d %H:%m:%S')
-
-
-    #--------------------------------------------------------------------------            
-
-    #@LogWrap.timediff
-    def fetchFeedUpdates(self,thr,lastpage=FIRST_PAGE):
-        '''Main feed updater method
-        @param thr: Number of updater threads to spawn into pool, this can be negative to count back from a lastpage value
-        @type thr; Integer
-        @param lastpage: Initial page number for feed requests
-        @type lastpage: Integer
-        '''
-        self.updater_running = True
-        self.exhausted = PAGE_LIMIT
-        self.lastpage = lastpage
-        self.newaddr = []
-        #print 'LP {} {}->{}'.format(FeedType.reverse[self.ft][:2].capitalize(),lastpage,lastpage+thr)
-        with pool_lock: self.pool = self._buildPool(lastpage,thr)
-
-    def _buildPool(self,lastpage,thr):
-        '''Builds a pool based on page spec provided, accepts negative thresholds for backfill requests
-        @param thr: Number of updater threads to spawn into pool, this can be negative to count back from a lastpage value
-        @type thr; Integer
-        @param lastpage: Initial page number for feed requests
-        @type lastpage: Integer
-        '''
-        span = range(min(lastpage,lastpage+thr),max(lastpage,lastpage+thr))
-        return [{'page':pno,'ref':self._monitorPage(pno),'time':time.time()} for pno in span]
-    
-    def _monitorPage(self,pno):
-        '''Initialise and store a DataUpdater instance for a single page request
-        @param pno: Page number to build DataUpdater request from
-        @type pno: Integer
-        @return: DataUpdater reference value
-        '''
-        ref = 'FP.{0}.Page{1}.{2:%y%m%d.%H%M%S}.p{3}'.format(self.etft,pno,DT.now(),pno)
-        aimslog.info('init DU {}'.format(ref))
-        self.duinst[ref] = self._fetchPage(ref,pno)
-        self.duinst[ref].register(self)
-        self.duinst[ref].start()
-        return ref    
-    
-    def _fetchPage(self,ref,pno):
-        '''Build DataUpdate instance          
-        @param ref: Unique reference string
-        @type ref: String      
-        @param pno: Page number to build DataUpdater request from
-        @type pno: Integer
-        @return: DataUpdater
-        '''   
-        params = (ref,self.conf,self.factory)
-        adrq = Queue.Queue()
-        pager = self.updater(params,adrq)
-        #address/feature requests called with bbox parameters
-        if self.etft==FEEDS['AF']: pager.setup(self.etft,self.sw,self.ne,pno)
-        else: pager.setup(self.etft,None,None,pno)
-        pager.setName(ref)
-        pager.setDaemon(True)
-        return pager
-
-    #NOTE. To override the behaviour, return feed once full, override this method RLock
-    def syncFeeds(self,new_addresses):
-        '''Checks if supplied addresses are different from a saved existing set and return in the out queue, with notification
-        @param new_addresses: List of all fetched pages from a full feed request, spanning all pages
-        @type new_addresses: List<Feature>
-        '''
-        #new_hash = hash(frozenset(new_addresses))
-        new_hash = hash(frozenset([na.getHash() for na in new_addresses]))
-        if self.data_hash[self.etft] != new_hash:
-            #print '>>> Changes in {} hash\n{}\n{}'.format(self.etft,self.data_hash[self.etft],new_hash)
-            self.data_hash[self.etft] = new_hash
-            #with sync_lock:
-            self.outq.put(new_addresses)
-            self.outq.task_done()
             self.notify(self.etft)
+            self.managePage((None,self.lastpage))
+            
+    #null method for features since page count not saved
+    def managePage(self,p):pass
 
     #--------------------------------------------------------------------------
     
@@ -282,7 +169,7 @@ class DataSync(Observable):
         self.respq.put(resp)
     
     #null method for features since page count not saved
-    def managePage(self,p):pass
+    def _updatePageRefs(self,p):pass
 
 
 class DataSyncFeatures(DataSync):
@@ -384,7 +271,7 @@ class DataSyncFeeds(DataSync):
         #self.duinst[ref].join()
         return ref
     
-    def managePage(self,p):
+    def _updatePageRefs(self,p):
         '''Saves page numbers back to tracker array
         @param p: first and last page numbers
         @type p: List<Integer>{2}
