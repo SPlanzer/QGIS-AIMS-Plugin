@@ -101,7 +101,8 @@ class LayerManager(QObject):
         self._statusBar = iface.mainWindow().statusBar()
         self._controller.uidm.register(self)
         self.rData = None
-        self.prevExt = None
+        self.prevExtFeat = None
+        self.prevExtLab = None                
         self.prevRdata = None
         self._adrLayer = None
         self._rclLayer = None
@@ -249,7 +250,7 @@ class LayerManager(QObject):
         elif layerId == 'ppr':
             self._pprLayer = layer
         elif layerId == 'lpr':
-            self._pprLayer = layer
+            self._lprLayer = layer
         elif layerId == 'rev':
             self._revLayer = layer
     
@@ -334,21 +335,25 @@ class LayerManager(QObject):
         """
         
               
-        refLayers ={'par':( 'par', 'bde', 'crs_parcel', 'id', True, 
-                            """ST_GeometryType(shape) IN ('ST_MultiPolygon', 'ST_Polygon') 
+        parQuery =  """ST_GeometryType(shape) IN ('ST_MultiPolygon', 'ST_Polygon') 
                                 AND status = 'CURR' 
-                                AND toc_code = 'PRIM'""",
-                            'Parcels' ) ,
+                                AND toc_code = 'PRIM'"""
+        
+        # require a better solution here to resolve failing to load due to no rows                        
+        labelsQuery = """(SELECT label, par_id, shape 
+                        FROM splanzer.par_label_for_bbox(177.06286,-37.97411, 177.06694,-37.97238))"""
+        
+        pendParQuery =  """ST_GeometryType(shape) IN ('ST_MultiPolygon', 'ST_Polygon') 
+                                AND status = 'PEND' 
+                                AND toc_code = 'PRIM'"""
+              
+        refLayers ={'par':( 'par', 'bde', 'crs_parcel', 'id', True, parQuery ,'Parcels' ) ,
                     
-                    #'lpr':( 'lpr', 'admin_bdys', 'parcel_labels_mview', 'id', True, "",'Parcels (Labels)' ) ,
+                    'lpr':( 'lpr', '', labelsQuery, 'par_id', True, "",'Parcels (Labels)' ) ,
                     
                     'rcl':( 'rcl', 'roads', 'simple_road_name_view', 'gid', True, "",'Roads' ),
                     
-                    'ppr':( 'ppr', 'bde', 'crs_parcel', 'id', True, 
-                            """ST_GeometryType(shape) IN ('ST_MultiPolygon', 'ST_Polygon') 
-                                AND status = 'PEND' 
-                                AND toc_code = 'PRIM'""",
-                            'Pending Parcels' )
+                    'ppr':( 'ppr', 'bde', 'crs_parcel', 'id', True, pendParQuery, 'Pending Parcels' )
                     }
 
         for layerId , layerProps in refLayers.items():
@@ -475,7 +480,7 @@ class LayerManager(QObject):
         uilog.info(' *** DATA ***    {} review items being loaded '.format(len(rData)))
         self.addToLayer(rData, layer)
     
-    def bboxWithPrevious(self, ext):
+    def bboxWithPrevious(self, prevExt, ext):
         """ 
         Test if the emitted canvas extent is within the previous extent
         
@@ -485,9 +490,9 @@ class LayerManager(QObject):
         @rtype: boolean
         """
 
-        if not self.prevExt: 
+        if not prevExt: 
             return False
-        elif QgsRectangle.contains(self.prevExt, ext):
+        elif QgsRectangle.contains(prevExt, ext):
             return True
         else: 
             return False
@@ -497,13 +502,25 @@ class LayerManager(QObject):
         Triggered by extent change - Set BBox in UIDataManager
         """
         
-        id = self._addressLayerId
-        layer = self.findLayer(id)
+        feat_layer = self.findLayer('adr')
+        parLabel_layer = self.findLayer('lpr')
+        
         ext = self._canvas.extent()
-        if self._canvas.scale() > layer.maximumScale() or self.bboxWithPrevious(ext): return 
-        uilog.info(' *** BBOX ***    {} '.format(ext.toString()))    
-        self._controller.uidm.setBbox(sw = (ext.xMinimum(), ext.yMinimum()), ne = (ext.xMaximum(), ext.yMaximum()))
-        self.prevExt = ext
+        sw = (ext.xMinimum(), ext.yMinimum())
+        ne = (ext.xMaximum(), ext.yMaximum())
+
+        #if self._canvas.scale() > feat_layer.maximumScale() or self.bboxWithPrevious(ext): return
+        
+        # Get Features 
+        if self._canvas.scale() < feat_layer.maximumScale() and not self.bboxWithPrevious(self.prevExtFeat, ext):
+            uilog.info(' *** BBOX ***    {} '.format(ext.toString()))    
+            self._controller.uidm.setBbox(sw, ne)
+            self.prevExtFeat = ext
+
+        # Get Par Labels 
+        if self._canvas.scale() < parLabel_layer.maximumScale() and not self.bboxWithPrevious(self.prevExtLab, ext):
+            self.updateLabels(parLabel_layer, sw, ne)
+            self.prevExtLab = ext
                             
     def getAimsFeatures(self):
         """ 
@@ -527,7 +544,15 @@ class LayerManager(QObject):
             self.getAimsFeatures()
         elif feedType == FEEDS['AR'] or feedType == FEEDS['GR']:
             self.updateReviewLayer()
-
+    
+    def updateLabels(self, layer, sw, ne):
+        uri = QgsDataSourceURI() # self these?
+        uri.setConnection(Database.host(),str(Database.port()),Database.database(),Database.user(),Database.password())
+        sql = """(SELECT label, par_id, shape 
+        FROM splanzer.par_label_for_bbox({0},{1},{2},{3}))""".format(sw[0], sw[1], ne[0], ne[1])
+        uri.setDataSource("", sql, "shape", "", "par_id" )
+        layer.setDataSource(uri.uri(), 'Parcels (Labels)', 'postgres', False)
+    
     def updateFeaturesLayer(self, featureData):
         """
         Add features to AIMS Address feature layer 
