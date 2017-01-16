@@ -100,6 +100,7 @@ class LayerManager(QObject):
         self._canvas = self._iface.mapCanvas()
         self._statusBar = iface.mainWindow().statusBar()
         self._controller.uidm.register(self)
+        self.legend = self._iface.legendInterface()
         self.rData = None
         self.prevExtFeat = None
         self.prevExtLab = None                
@@ -311,9 +312,8 @@ class LayerManager(QObject):
         
         layer = self.findLayer(id)
         if layer:
-            legend = self._iface.legendInterface()
-            if not legend.isLayerVisible(layer):
-                legend.setLayerVisible(layer, True)
+            if not self.legend.isLayerVisible(layer):
+                self.legend.setLayerVisible(layer, True)
             return layer
         self._statusBar.showMessage("Loading layer " + displayname)
         try:
@@ -357,8 +357,12 @@ class LayerManager(QObject):
                     }
 
         for layerId , layerProps in refLayers.items():
-            if not self.findLayer(layerId):
-                self.installLayer(* layerProps) 
+            layer = self.findLayer(layerId)
+            if not layer:
+                layer = self.installLayer(* layerProps) 
+                
+                if layerId == 'lpr':
+                    self.legend.setLayerVisible(layer, False)
 
     def addLayerFields(self, layer, provider, id, fields):
         """
@@ -406,7 +410,7 @@ class LayerManager(QObject):
         
     def isVisible(self, layer):
         """
-        Test if a layer is visible 
+        Test if a layer is visible as per scale based vis 
 
         @param layer: AIMS vector layer  
         @type  layer: qgis._core.QgsVectorLayer 
@@ -518,7 +522,11 @@ class LayerManager(QObject):
             self.prevExtFeat = ext
 
         # Get Par Labels 
-        if self._canvas.scale() < parLabel_layer.maximumScale() and not self.bboxWithPrevious(self.prevExtLab, ext):
+        if (self._canvas.scale() < parLabel_layer.maximumScale() 
+            and not self.bboxWithPrevious(self.prevExtLab, ext)  
+            and self.isVisible(parLabel_layer)
+            and self.legend.isLayerVisible(parLabel_layer)):
+            
             self.updateLabels(parLabel_layer, sw, ne)
             self.prevExtLab = ext
                             
@@ -546,6 +554,10 @@ class LayerManager(QObject):
             self.updateReviewLayer()
     
     def updateLabels(self, layer, sw, ne):
+        
+        uilog.info(' *** UPDATING LABELS *** ')    
+
+        
         uri = QgsDataSourceURI() # self these?
         uri.setConnection(Database.host(),str(Database.port()),Database.database(),Database.user(),Database.password())
         sql = """(SELECT label, par_id, shape 
@@ -569,9 +581,8 @@ class LayerManager(QObject):
             layer = self.findLayer(id) 
         if not self.isVisible(layer): 
             return
-        legend = self._iface.legendInterface()
-        if not legend.isLayerVisible(layer):
-            legend.setLayerVisible(layer, True)
+        if not self.legend.isLayerVisible(layer):
+            self.legend.setLayerVisible(layer, True)
         # remove current features 
         self.removeFeatures(layer)
         uilog.info(' *** CANVAS ***    Adding Features') 
