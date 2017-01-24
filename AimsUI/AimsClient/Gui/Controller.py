@@ -275,6 +275,7 @@ class Controller( QObject ):
         if not self.revLayer:
             self._layerManager.installAimsLayer('rev', 'AIMS Review')
         self._layerManager.initialiseExtentEvent()
+        self._layerManager.initialiseVisChangedEvent()
     
     def mapToolChanged(self):
         """ 
@@ -366,6 +367,7 @@ class Controller( QObject ):
         """
         
         self._layerManager.disconnectExtentEvent()
+        self._layerManager.disconnectVisChangedEvent()
         if self._queues:
             self._queues.close()
             self._queues = None 

@@ -98,9 +98,10 @@ class LayerManager(QObject):
         self._iface = iface
         self._controller = controller
         self._canvas = self._iface.mapCanvas()
+        self._root = QgsProject.instance().layerTreeRoot()
         self._statusBar = iface.mainWindow().statusBar()
         self._controller.uidm.register(self)
-        self.legend = self._iface.legendInterface()
+        self._legend = self._iface.legendInterface()
         self.rData = None
         self.prevExtFeat = None
         self.prevExtLab = None                
@@ -114,8 +115,28 @@ class LayerManager(QObject):
         self._revLayer = None
         self._extEvent = False
         
+        
         QgsMapLayerRegistry.instance().layerWillBeRemoved.connect(self.checkRemovedLayer)
         QgsMapLayerRegistry.instance().layerWasAdded.connect( self.checkNewLayer )
+    
+    def initialiseVisChangedEvent(self):  
+        """ 
+        When the plugin is enabled (Via the .Controller()) 
+        QGIS extentChanged signal connected to setbbox method  
+        """
+    
+        #self._root = QgsProject.instance().layerTreeRoot()
+        self._root.visibilityChanged.connect(self.layerVisChanged)
+        self._visEvent = True
+
+    def disconnectVisChangedEvent(self): 
+        """
+        At plugin unload, disconnect the 
+            extent changed / bbox event
+        """
+        if self._visEvent: 
+            self._root.visibilityChanged.disconnect(self.layerVisChanged)
+            self._visEvent = False   
     
     def initialiseExtentEvent(self):  
         """ 
@@ -312,8 +333,8 @@ class LayerManager(QObject):
         
         layer = self.findLayer(id)
         if layer:
-            if not self.legend.isLayerVisible(layer):
-                self.legend.setLayerVisible(layer, True)
+            if not self._legend.isLayerVisible(layer):
+                self._legend.setLayerVisible(layer, True)
             return layer
         self._statusBar.showMessage("Loading layer " + displayname)
         try:
@@ -341,7 +362,7 @@ class LayerManager(QObject):
         
         # require a better solution here to resolve failing to load due to no rows                        
         labelsQuery = """(SELECT label, par_id, shape 
-                        FROM splanzer.par_label_for_bbox(177.06286,-37.97411, 177.06694,-37.97238))"""
+                        FROM bde.par_label_for_bbox(174.77370,-41.28589, 174.77495,-41.28509))"""
         
         pendParQuery =  """ST_GeometryType(shape) IN ('ST_MultiPolygon', 'ST_Polygon') 
                                 AND status = 'PEND' 
@@ -361,8 +382,9 @@ class LayerManager(QObject):
             if not layer:
                 layer = self.installLayer(* layerProps) 
                 
+                # always init layer with with vis toggled off 
                 if layerId == 'lpr':
-                    self.legend.setLayerVisible(layer, False)
+                    self._legend.setLayerVisible(layer, False)
 
     def addLayerFields(self, layer, provider, id, fields):
         """
@@ -505,30 +527,39 @@ class LayerManager(QObject):
         """ 
         Triggered by extent change - Set BBox in UIDataManager
         """
-        
-        feat_layer = self.findLayer('adr')
-        parLabel_layer = self.findLayer('lpr')
-        
+             
         ext = self._canvas.extent()
-        sw = (ext.xMinimum(), ext.yMinimum())
-        ne = (ext.xMaximum(), ext.yMaximum())
-
-        #if self._canvas.scale() > feat_layer.maximumScale() or self.bboxWithPrevious(ext): return
-        
+       
         # Get Features 
-        if self._canvas.scale() < feat_layer.maximumScale() and not self.bboxWithPrevious(self.prevExtFeat, ext):
-            uilog.info(' *** BBOX ***    {} '.format(ext.toString()))    
-            self._controller.uidm.setBbox(sw, ne)
-            self.prevExtFeat = ext
+        self.getFeaturesBbox(ext)
 
         # Get Par Labels 
+        self.getParLabel(ext)
+    
+    def getFeaturesBbox(self, ext):
+        feat_layer = self.findLayer('adr')
+        if self._canvas.scale() < feat_layer.maximumScale() and not self.bboxWithPrevious(self.prevExtFeat, ext):
+            uilog.info(' *** BBOX ***    {} '.format(ext.toString()))    
+            self._controller.uidm.setBbox((ext.xMinimum(), ext.yMinimum()), (ext.xMaximum(), ext.yMaximum()))
+            self.prevExtFeat = ext
+      
+    def getParLabel(self, ext):
+        parLabel_layer = self.findLayer('lpr')
+    
         if (self._canvas.scale() < parLabel_layer.maximumScale() 
-            and not self.bboxWithPrevious(self.prevExtLab, ext)  
-            and self.isVisible(parLabel_layer)
-            and self.legend.isLayerVisible(parLabel_layer)):
-            
-            self.updateLabels(parLabel_layer, sw, ne)
+        and not self.bboxWithPrevious(self.prevExtLab, ext)  
+        and self.isVisible(parLabel_layer)
+        and self._legend.isLayerVisible(parLabel_layer)):
+        
+            self.updateLabels(parLabel_layer, (ext.xMinimum(), ext.yMinimum()), (ext.xMaximum(), ext.yMaximum()))
             self.prevExtLab = ext
+    
+    
+    def layerVisChanged(self, node, state):
+        if state == 2 and node.name() == 'Parcels (Labels)':        
+            ext = self._canvas.extent()
+            self.getParLabel(ext)
+        
                             
     def getAimsFeatures(self):
         """ 
@@ -557,11 +588,10 @@ class LayerManager(QObject):
         
         uilog.info(' *** UPDATING LABELS *** ')    
 
-        
-        uri = QgsDataSourceURI() # self these?
+        uri = QgsDataSourceURI()
         uri.setConnection(Database.host(),str(Database.port()),Database.database(),Database.user(),Database.password())
         sql = """(SELECT label, par_id, shape 
-        FROM splanzer.par_label_for_bbox({0},{1},{2},{3}))""".format(sw[0], sw[1], ne[0], ne[1])
+            FROM splanzer.bde_get_appellation_within_bbox({0},{1},{2},{3}))""".format(sw[0], sw[1], ne[0], ne[1])
         uri.setDataSource("", sql, "shape", "", "par_id" )
         layer.setDataSource(uri.uri(), 'Parcels (Labels)', 'postgres', False)
     
@@ -581,8 +611,8 @@ class LayerManager(QObject):
             layer = self.findLayer(id) 
         if not self.isVisible(layer): 
             return
-        if not self.legend.isLayerVisible(layer):
-            self.legend.setLayerVisible(layer, True)
+        if not self._legend.isLayerVisible(layer):
+            self._legend.setLayerVisible(layer, True)
         # remove current features 
         self.removeFeatures(layer)
         uilog.info(' *** CANVAS ***    Adding Features') 
