@@ -15,6 +15,7 @@ from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 from qgis.core import *
 from qgis.gui import *
+from qgis.utils import qgsfunction
 import sip
 from AimsClient import Database
 from AimsUI.AimsLogging import Logger
@@ -24,6 +25,20 @@ from collections import OrderedDict
 aimslog = Logger.setup()
 uilog = None
 sip.setapi('QVariant', 2)
+
+
+@qgsfunction(args="auto", group='Python', register=False)
+def getParApp(layer_name, feature, parent):
+    layer=None
+    for lyr in QgsMapLayerRegistry.instance().mapLayers().values():
+        if lyr.name() == layer_name:
+            layer = lyr
+            break
+    rel = layer.referencingRelations(0)[0]
+    feat_rel = rel.getReferencedFeature(feature)
+    if feat_rel:
+        return feat_rel.attribute('appellation')
+
 
 class Mapping():
     """ 
@@ -114,8 +129,8 @@ class LayerManager(QObject):
         self._extEvent = False
         
         QgsMapLayerRegistry.instance().layerWillBeRemoved.connect(self.checkRemovedLayer)
-        QgsMapLayerRegistry.instance().layerWasAdded.connect( self.checkNewLayer )
-    
+        QgsMapLayerRegistry.instance().layerWasAdded.connect( self.checkNewLayer )   
+        
     def initialiseExtentEvent(self):  
         """ 
         When the plugin is enabled (Via the .Controller()) 
@@ -124,6 +139,8 @@ class LayerManager(QObject):
         
         self._canvas.extentsChanged.connect(self.setbbox)
         self._extEvent = True
+        
+        QgsExpression.registerFunction(getParApp)
     
     def disconnectExtentEvent(self):  
         """
@@ -135,6 +152,8 @@ class LayerManager(QObject):
         if self._extEvent: 
             self._canvas.extentsChanged.disconnect(self.setbbox)
             self._extEvent = False   
+        
+        QgsExpression.unregisterFunction('getParApp')
         
     def layerId(self, layer):
         """ 
