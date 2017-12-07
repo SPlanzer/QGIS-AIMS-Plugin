@@ -11,7 +11,7 @@
 #
 ################################################################################
 
-#http://devassgeo01:8080/aims/api/address/features - properties
+#http://<AIMS-SERVER>:8080/aims/api/address/features - properties
 from AimsUtility import ActionType,ApprovalType,FeedType
 from AimsUtility import AimsException
 from AimsLogging import Logger

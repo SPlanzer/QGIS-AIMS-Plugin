@@ -73,7 +73,7 @@ LOCAL_ADL = 'aimsdata'
 MERGE_RESPONSE = True
 
 #comma separated list of response attributes to exclude from merge
-MERGE_EXCLUDE = 'workflow_sourceReason'
+MERGE_EXCLUDE = '_workflow_sourceReason'
 
 #string to prepend to hacked supplemental requests (can be anything)
 HACK_SUP_IND = 'supplemental'

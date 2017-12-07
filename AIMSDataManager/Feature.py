@@ -11,9 +11,10 @@
 #
 ################################################################################
 
-#http://devassgeo01:8080/aims/api/address/features - properties
+#http://<AIMS-SERVER>:8080/aims/api/address/features - properties
 import hashlib
 import re
+import copy
 from AimsUtility import FeatureType,ActionType,ApprovalType,FeedType
 from AimsLogging import Logger
 
@@ -150,14 +151,16 @@ class Feature(object):
         return self.meta.hash
     
     @staticmethod
-    def clone(a,b=None):
+    def clone(a,b=None,deep=False):
         '''Clones attributes of A to B and instantiates B (as type A) if not provided
         @param a: Feature object to-be cloned
         @type a: Feature
         @param b: Feature object being overwritten (optional)
         @type b: Feature
-        @return: Manual deepcop of Feature object 
+        @return: Manual shallow copy of Feature object 
         '''
+        if deep: return copy.deepcopy(a)
+        #else: return copy.copy(a)
         #duplicates only attributes set in source object
         from FeatureFactory import FeatureFactory
         if not b: b = FeatureFactory.getInstance(a.type).get()

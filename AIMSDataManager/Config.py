@@ -11,16 +11,26 @@
 import os
 import sys
 import re
-import ConfigParser
 from string import whitespace
+
+PYVER3 = sys.version_info > (3,)
+
+#2 to 3 imports
+if PYVER3:
+     import configparser as ConfigParser
+else:
+     import ConfigParser
 
 import getpass
 import base64
+
 try:
     from Crypto.Cipher import AES
     USE_PLAINTEXT = False
 except:
     USE_PLAINTEXT = True
+    print('Local Password Encoding, DISABLED')
+    
 
 UNAME = os.environ['USERNAME'] if re.search('win',sys.platform) else os.environ['LOGNAME']
 DEF_CONFIG = {'db':{'host':'127.0.0.1'},'user':{'name':UNAME}}
@@ -32,9 +42,11 @@ if not USE_PLAINTEXT:
     PADDING = '{'
     BLOCK_SIZE = 16
     pad = lambda s: s + (BLOCK_SIZE - len(s) % BLOCK_SIZE) * PADDING
+    unpad = lambda s: s.decode('utf8').rstrip(PADDING)
     EncodeAES = lambda c, s: base64.b64encode(c.encrypt(pad(s)))
-    DecodeAES = lambda c, e: c.decrypt(base64.b64decode(e)).rstrip(PADDING)
-
+    #DecodeAES = lambda c, e: c.decrypt(base64.b64decode(e)).rstrip(PADDING)
+    DecodeAES = lambda c, e: unpad(c.decrypt(base64.b64decode(e)))
+    
 class ConfigReader(object):
     '''Reader class for configparser object'''
     cp = ConfigParser.ConfigParser()
@@ -65,7 +77,7 @@ class ConfigReader(object):
                 
     def _fillConfig(self):
         '''Attempt to fill missing local dict values not included in config file with matching environment variables.
-        - I{This if needed to pass encrypted values when it is unsafe to be store them in a git repo}
+        - I{This if needed to pass encrypted values when it is unsafe to store them in a git repo}
         '''
         #NOTE env vars must use aims_sec_opt=val format and are bypassed with null value
         for sect in self.d:
@@ -94,7 +106,7 @@ class ConfigReader(object):
     
     @staticmethod
     def readp():
-        from Const import CT_IND      
+        from Const import CT_IND
         cp = ConfigParser.ConfigParser()
         cp.read(AIMS_CONFIG)
         sometext = cp.get('user','pass')
@@ -125,10 +137,10 @@ class ConfigReader(object):
 def test():
     #ConfigReader.writep('secretpassword')
     p = ConfigReader.readp()
-    print p
+    print (p)
     
     p = ConfigReader.readp()
-    print p
+    print (p)
     
     ConfigReader._writep(p)
     

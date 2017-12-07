@@ -329,12 +329,12 @@ class DataUpdaterDRC(DataUpdater):
             return 1    
         
     def run(self):
-        '''One pass run method to intercat with APi and return sincel page results
+        '''One pass run method to interact with APi and return single page results
         - Call appropriate API method
         - Parse response Entities and attach to feature
         - Attach error messages and request ID
         - Merge response object with request object
-        - Put featre on output queue
+        - Put feature on output queue
         - Notify listeners 
         '''
         aimslog.info('DUr.{} {} - AGU{}'.format(self.ref,self.actiontype.reverse[self.at],self.agu))

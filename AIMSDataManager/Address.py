@@ -13,7 +13,7 @@
 ################################################################################
 '''Address module containing data classes representing basic address object as returned from the AIMS API feature.change and resolution feeds'''
 
-#http://devassgeo01:8080/aims/api/address/features - properties
+#http://<AIMS-SERVER>:8080/aims/api/address/features - properties
 from AimsUtility import FeatureType,ActionType,ApprovalType,FeedType,FeedRef
 from AimsUtility import AimsException
 from AimsLogging import Logger
